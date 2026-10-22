@@ -2,125 +2,315 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(
-    page_title="Dashboard de ventas",
-    page_icon="📊",
+    page_title="Dashboard de videojuegos",
+    page_icon="🎮",
     layout="wide"
 )
 
 
+# =========================
+# 1. CARGAR LA BASE DE DATOS
+# =========================
+
 @st.cache_data
 def cargar_datos():
-    df = pd.read_csv("ventas.csv")
-    df["Fecha"] = pd.to_datetime(df["Fecha"])
-    df["Total"] = df["Precio"] * df["Cantidad"]
-    df["Mes"] = df["Fecha"].dt.strftime("%Y-%m")
+    df = pd.read_csv(
+        "ultimate_video_game_industry_dataset_v3_20000.csv"
+    )
+
+    df["release_date"] = pd.to_datetime(
+        df["release_date"], errors="coerce"
+    )
+
+    # Evitar errores si existen datos faltantes
+    columnas_numericas = [
+        "estimated_revenue_million",
+        "copies_sold_million",
+        "metacritic_score",
+        "user_score",
+        "steam_rating_percent",
+        "budget_million_usd",
+        "release_year"
+    ]
+
+    for columna in columnas_numericas:
+        df[columna] = pd.to_numeric(
+            df[columna], errors="coerce"
+        )
+
     return df
+
 
 df = cargar_datos()
 
 
-st.title("Dashboard de ventas")
-st.write("Consulta y analiza los registros de ventas.")
+# =========================
+# 2. ENCABEZADO
+# =========================
 
-
-st.sidebar.header("Controles")
-
-categorias = st.sidebar.multiselect(
-    "Filtrar por categoria",
-    options=sorted(df["Categoria"].unique()),
-    default=sorted(df["Categoria"].unique())
+st.title("🎮 Dashboard de la industria de videojuegos")
+st.write(
+    "Explora los videojuegos por género, año de lanzamiento, "
+    "calificaciones y rendimiento comercial."
 )
 
-meses = st.sidebar.multiselect(
-    "Filtrar por mes",
-    options=sorted(df["Mes"].unique()),
-    default=sorted(df["Mes"].unique())
-)
-
-pagos = st.sidebar.multiselect(
-    "Filtrar por metodo de pago",
-    options=sorted(df["Pago"].unique()),
-    default=sorted(df["Pago"].unique())
+st.caption(
+    f"Base de datos: {len(df):,} registros"
 )
 
 
-busqueda = st.text_input("Buscar producto")
+# =========================
+# 3. FILTROS LATERALES
+# =========================
 
+st.sidebar.header("Filtros")
+
+generos = st.sidebar.multiselect(
+    "Género",
+    options=sorted(df["genre"].dropna().unique()),
+    default=sorted(df["genre"].dropna().unique())
+)
+
+anios = st.sidebar.slider(
+    "Año de lanzamiento",
+    min_value=int(df["release_year"].min()),
+    max_value=int(df["release_year"].max()),
+    value=(
+        int(df["release_year"].min()),
+        int(df["release_year"].max())
+    )
+)
+
+exitos = st.sidebar.multiselect(
+    "Éxito comercial",
+    options=sorted(
+        df["commercial_success"].dropna().unique()
+    ),
+    default=sorted(
+        df["commercial_success"].dropna().unique()
+    )
+)
+
+desarrolladores = st.sidebar.multiselect(
+    "Tamaño del desarrollador",
+    options=sorted(
+        df["developer_size"].dropna().unique()
+    ),
+    default=sorted(
+        df["developer_size"].dropna().unique()
+    )
+)
+
+
+# =========================
+# 4. BUSCADOR
+# =========================
+
+busqueda = st.text_input(
+    "🔎 Buscar videojuego, franquicia o desarrollador",
+    placeholder="Ejemplo: Minecraft"
+)
+
+
+# =========================
+# 5. APLICAR FILTROS
+# =========================
 
 filtrado = df[
-    df["Categoria"].isin(categorias)
-    & df["Mes"].isin(meses)
-    & df["Pago"].isin(pagos)
-]
+    df["genre"].isin(generos)
+    & df["release_year"].between(anios[0], anios[1])
+    & df["commercial_success"].isin(exitos)
+    & df["developer_size"].isin(desarrolladores)
+].copy()
 
-if busqueda:
-    filtrado = filtrado[
-        filtrado["Producto"].str.contains(
-            busqueda, case=False, na=False
+if busqueda.strip():
+    texto = busqueda.strip()
+
+    coincide = (
+        filtrado["title"].str.contains(
+            texto, case=False, na=False
         )
-    ]
+        | filtrado["franchise"].str.contains(
+            texto, case=False, na=False
+        )
+        | filtrado["developer"].str.contains(
+            texto, case=False, na=False
+        )
+    )
 
-col1, col2, col3 = st.columns(3)
+    filtrado = filtrado[coincide]
+
+
+# =========================
+# 6. INDICADORES PRINCIPALES
+# =========================
+
+st.subheader("Indicadores generales")
+
+col1, col2, col3, col4 = st.columns(4)
+
+ingresos = filtrado[
+    "estimated_revenue_million"
+].sum()
+
+unidades = filtrado[
+    "copies_sold_million"
+].sum()
+
+calificacion = filtrado[
+    "metacritic_score"
+].mean()
 
 col1.metric(
-    "Ventas totales",
-    f"${filtrado['Total'].sum():,.2f}"
+    "Ingresos estimados",
+    f"${ingresos:,.2f} M USD"
 )
+
 col2.metric(
-    "Unidades vendidas",
-    int(filtrado["Cantidad"].sum())
+    "Copias vendidas",
+    f"{unidades:,.2f} M"
 )
+
 col3.metric(
-    "Registros",
-    len(filtrado)
+    "Videojuegos registrados",
+    f"{len(filtrado):,}"
 )
 
-st.divider()
-
-if st.checkbox("Mostrar dataset"):
-    st.subheader("Base de datos de ventas")
-    st.dataframe(filtrado, use_container_width=True)
-
-if st.checkbox("Mostrar grafica de ventas por categoria"):
-    st.subheader("Ventas por categoria")
-    ventas_categoria = (
-        filtrado.groupby("Categoria")["Total"].sum()
-    )
-    st.bar_chart(ventas_categoria)
+col4.metric(
+    "Metacritic promedio",
+    f"{calificacion:.1f}/100"
+    if pd.notna(calificacion)
+    else "Sin datos"
+)
 
 
-if st.checkbox("Mostrar grafica de ventas por mes"):
-    st.subheader("Ventas por mes")
-    ventas_mes = (
-        filtrado.groupby("Mes")["Total"].sum().sort_index()
-    )
-    st.line_chart(ventas_mes)
-
-if st.checkbox("Mostrar grafica por metodo de pago"):
-    st.subheader("Ventas por metodo de pago")
-    ventas_pago = filtrado.groupby("Pago")["Total"].sum()
-    st.bar_chart(ventas_pago)
-
+# =========================
+# 7. GRÁFICAS
+# =========================
 
 st.divider()
-st.subheader("Acerca de")
 
-st.write("Autora: Angélica Martínez Hernández")
-st.write("Carrera: Licenciatura en Ingeniería de Software")
-st.write("Matrícula: zS26004664")
-st.write("Ciudad natal: Coscomatepec, Veracruz, México")
+if filtrado.empty:
+    st.warning(
+        "No hay videojuegos que coincidan con los filtros."
+    )
+else:
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Ingresos por género")
+
+        ingresos_genero = (
+            filtrado.groupby("genre")[
+                "estimated_revenue_million"
+            ]
+            .sum()
+            .sort_values(ascending=False)
+        )
+
+        st.bar_chart(ingresos_genero)
+
+    with col2:
+        st.subheader("Ingresos por año")
+
+        ingresos_anio = (
+            filtrado.groupby("release_year")[
+                "estimated_revenue_million"
+            ]
+            .sum()
+            .sort_index()
+        )
+
+        st.line_chart(ingresos_anio)
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        st.subheader("Rendimiento comercial")
+
+        rendimiento = (
+            filtrado.groupby("commercial_success")
+            .size()
+            .sort_values(ascending=False)
+        )
+
+        st.bar_chart(rendimiento)
+
+    with col4:
+        st.subheader("Calificación por género")
+
+        puntuaciones = (
+            filtrado.groupby("genre")[
+                "metacritic_score"
+            ]
+            .mean()
+            .dropna()
+            .sort_values(ascending=False)
+        )
+
+        st.bar_chart(puntuaciones)
 
 
-st.subheader("Ubicacion de mi ciudad natal")
+# =========================
+# 8. TABLA DE VIDEOJUEGOS
+# =========================
 
-mapa = pd.DataFrame({
-    "lat": [19.072775],
-    "lon": [-97.04685]
-})
+st.divider()
+st.subheader("📋 Catálogo de videojuegos")
 
-st.map(
-    mapa,
-    latitude="lat",
-    longitude="lon",
-    zoom=12
+columnas = [
+    "title",
+    "franchise",
+    "release_year",
+    "genre",
+    "developer",
+    "launch_price_usd",
+    "copies_sold_million",
+    "estimated_revenue_million",
+    "metacritic_score",
+    "commercial_success"
+]
+
+if st.checkbox("Mostrar base de datos"):
+    st.dataframe(
+        filtrado[columnas],
+        use_container_width=True,
+        hide_index=True
+    )
+
+    csv = filtrado[columnas].to_csv(
+        index=False
+    ).encode("utf-8-sig")
+
+    st.download_button(
+        "📥 Descargar datos filtrados",
+        data=csv,
+        file_name="videojuegos_filtrados.csv",
+        mime="text/csv"
+    )
+
+
+# =========================
+# 9. TOP 10 VIDEOJUEGOS
+# =========================
+
+st.divider()
+st.subheader("🏆 Top 10 por ingresos estimados")
+
+top_10 = filtrado.nlargest(
+    10, "estimated_revenue_million"
+)[
+    [
+        "title",
+        "genre",
+        "estimated_revenue_million",
+        "copies_sold_million",
+        "metacritic_score"
+    ]
+]
+
+st.dataframe(
+    top_10,
+    use_container_width=True,
+    hide_index=True
 )
